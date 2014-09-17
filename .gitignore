@@ -8,3 +8,6 @@ release.properties
 logs
 *.txt
 
+# Intellij
+.idea
+*.iml

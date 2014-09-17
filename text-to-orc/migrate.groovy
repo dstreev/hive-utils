@@ -24,9 +24,9 @@ sql = Sql.newInstance('jdbc:mysql://' + options.mh + ':3306/' + options.md, opti
 
 TYPE_POSTFIX = "_orc"
 
-def PARALLEL_PARTITIONS = ""
+def PARALLEL_PARTITIONS = 30
 if (options.pp) {
-    PARALLEL_PARTITIONS = options.pp
+    PARALLEL_PARTITIONS = options.pp.toInteger()
 } else {
     PARALLEL_PARTITIONS = 30
 }
@@ -43,11 +43,11 @@ options.hts.each { intable ->
             "set hive.exec.dynamic.partition.mode=nonstrict;"
 
     sql.eachRow("select db.name, t.tbl_id, t.tbl_name, t.tbl_type, s.input_format, s.location from " +
-            "dbs db inner join tbls t on db.db_id = t.db_id inner join sds s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
+            "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
 
         def fields = []
         sql.eachRow("select c2.column_name, c2.type_name from " +
-                "tbls t inner join sds s on t.sd_id = s.sd_id inner join cds c on s.cd_id = c.cd_id inner join columns_v2 c2 on c.cd_id = c2.cd_id " +
+                "TBLS t inner join SDS s on t.sd_id = s.sd_id inner join CDS c on s.cd_id = c.cd_id inner join COLUMNS_V2 c2 on c.cd_id = c2.cd_id " +
                 "where t.tbl_id = $table.tbl_id order by c2.integer_idx") { column ->
             fields.add("$column.column_name")
         }
@@ -63,7 +63,7 @@ options.hts.each { intable ->
         // Partitions
         // Definition
         def partition_def = []
-        sql.eachRow("select p.pkey_name, p.pkey_type from tbls t inner join partition_keys p on t.tbl_id = p.tbl_id where t.tbl_id = $table.tbl_id order by p.integer_idx; ") { partition ->
+        sql.eachRow("select p.pkey_name, p.pkey_type from TBLS t inner join PARTITION_KEYS p on t.tbl_id = p.tbl_id where t.tbl_id = $table.tbl_id order by p.integer_idx; ") { partition ->
             // TODO: For now, going to assume partitions are all of type STRING.
             partition_def.add("$partition.pkey_name")
         }
@@ -80,7 +80,7 @@ options.hts.each { intable ->
         def where = []
         if (partition_def.size() > 0) {
             def partitions = []
-            sql.eachRow("select p.part_name from tbls t inner join partitions p on " +
+            sql.eachRow("select p.part_name from TBLS t inner join PARTITIONS p on " +
                     "t.tbl_id = p.tbl_id where t.tbl_id = '$table.tbl_id' order by p.part_name;") { partition ->
                 partitions.add("$partition.part_name")
             }

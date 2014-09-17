@@ -35,7 +35,7 @@ options.hts.each { intable ->
 
 
     sql.eachRow("select db.name, t.tbl_id, t.tbl_name, t.tbl_type, s.input_format, s.location from " +
-            "dbs db inner join tbls t on db.db_id = t.db_id inner join sds s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
+            "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
 //    println "$table.name, $table.tbl_name, $table.tbl_type, $table.input_format, $table.location"
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
             println "CREATE EXTERNAL TABLE $table.name" + "." + "$table.tbl_name" + TYPE_POSTFIX + " ("
@@ -44,7 +44,7 @@ options.hts.each { intable ->
         }
 
         sql.eachRow("select c2.column_name, c2.type_name from " +
-                "tbls t inner join sds s on t.sd_id = s.sd_id inner join cds c on s.cd_id = c.cd_id inner join columns_v2 c2 on c.cd_id = c2.cd_id " +
+                "TBLS t inner join SDS s on t.sd_id = s.sd_id inner join CDS c on s.cd_id = c.cd_id inner join COLUMNS_V2 c2 on c.cd_id = c2.cd_id " +
                 "where t.tbl_id = $table.tbl_id order by c2.integer_idx") { column ->
             println "   $column.column_name $column.type_name" + ","
         }
@@ -52,7 +52,7 @@ options.hts.each { intable ->
         // Partitions
         def partitions = []
         PARTITIONS = ""
-        sql.eachRow("select p.pkey_name, p.pkey_type from tbls t inner join partition_keys p on t.tbl_id = p.tbl_id where t.tbl_id = $table.tbl_id order by p.integer_idx; ") { partition ->
+        sql.eachRow("select p.pkey_name, p.pkey_type from TBLS t inner join PARTITION_KEYS p on t.tbl_id = p.tbl_id where t.tbl_id = $table.tbl_id order by p.integer_idx; ") { partition ->
             partitions.add("$partition.pkey_name $partition.pkey_type")
         }
         partitions.each { partition ->
