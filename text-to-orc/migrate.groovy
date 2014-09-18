@@ -13,6 +13,8 @@ def cli = new CliBuilder()
 cli.hd(longOpt: 'hive-database', args: 1, required: true, 'Database to include, REQUIRED')
 cli.ht(longOpt: 'hive-tables', args: Option.UNLIMITED_VALUES, valueSeparator: ',', required: true, 'Comma separated list of tables, REQUIRED')
 cli.pp(longOpt: 'parallel-partitions', args: 1, required: false, 'Parallel Partition Count to process in statement(default 30)')
+cli.nohup(longOpt: 'nohup', args: 1, required: false, 'Build scripts to run each load sql in it\'s nohup thread')
+cli.output(longOpt: 'output-dir', args: 1, required: false, 'Output Directory for nohup scripts')
 cli.mh(longOpt: 'metastore-host', args: 1, required: true, 'Metastore Database Host')
 cli.mu(longOpt: 'metastore-user', args: 1, required: true, 'Metastore Database Username')
 cli.mp(longOpt: 'metastore-password', args: 1, required: true, 'Metastore Database Password')
@@ -34,16 +36,50 @@ TYPE_POSTFIX = "_orc"
 
 def database = options.hd
 
+def outputdir
+def controlfile
+
+// Cleanup and/or prep for new output.
+if (options.nohup.asBoolean() == true) {
+    if (!options.output) {
+        println "Need to specify an output directory to write scripts and sql for 'nohup' option."
+        return -1
+    }
+    outputdir = new File(options.output);
+    if (outputdir.exists()) {
+        println "Deleting existing Directory"
+        outputdir.delete()
+    }
+    outputdir.mkdir();
+    controlfile = new File(options.output+"/control.sh")
+    return 0
+}
+
+/*
+def fields = ["a":"1", "b":"2", "c":"3"]
+new File("foo.ini").withWriter { out ->
+    fields.each() { key, value ->
+        out.writeLine("${key}=${value}")
+    }
+}
+*/
+
+HIVE_SET="set hive.exec.dynamic.partition=true;\n" +
+"set hive.exec.dynamic.partition.mode=nonstrict;"
+
 // Append "s" to the "t" to get all... i know, crazy, right...
 options.hts.each { intable ->
-    println "${intable}"
+    //println "${intable}"
 
-    // Prepare for dynamic queries.
-    println "set hive.exec.dynamic.partition=true;\n" +
-            "set hive.exec.dynamic.partition.mode=nonstrict;"
+    if (options.nohup.asBoolean() != true) {
+        // Prepare for dynamic queries.
+        println $HIVE_SET
+    }
 
     sql.eachRow("select db.name, t.tbl_id, t.tbl_name, t.tbl_type, s.input_format, s.location from " +
             "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
+
+        println "USE $database;"
 
         def fields = []
         sql.eachRow("select c2.column_name, c2.type_name from " +
@@ -75,7 +111,7 @@ options.hts.each { intable ->
             }
         }
 
-        def INSERT_STATEMENT = "INSERT OVERWRITE " + database + ".${intable}" + TYPE_POSTFIX + " "
+        def INSERT_STATEMENT = "INSERT OVERWRITE TABLE $intable" + TYPE_POSTFIX + " "
 
         def where = []
         if (partition_def.size() > 0) {
@@ -112,7 +148,7 @@ options.hts.each { intable ->
                     if (actual_partition == partitions.last()) {
                         // Last partition, special Handling.
                         wherePart.add(key + " <= '" + value + "'")
-                        println INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1]
+                        println INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
                     } else {
                         if (value == lastPart) {
                             // Nothing, continue to next partition.  This enables us to scan and build statements
@@ -130,7 +166,7 @@ options.hts.each { intable ->
                             if (part_count >= PARALLEL_PARTITIONS - 1) {
                                 // reset
                                 // set where based on current where part.
-                                println INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1]
+                                println INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
                                 wherePart = []
                                 part_count = 0;
                             } else {

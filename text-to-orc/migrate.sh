@@ -6,4 +6,4 @@ cd `dirname $0`
 
 . ./util-env.sh
 
-. ./migrate.groovy "$@" -mh $METASTORE_HOST -mu $METASTORE_USER -mp $METASTORE_PASSWORD -md $METASTORE_DATABASE
+./migrate.groovy "$@" -mh $METASTORE_HOST -mu $METASTORE_USER -mp $METASTORE_PASSWORD -md $METASTORE_DATABASE

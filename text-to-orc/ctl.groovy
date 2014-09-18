@@ -31,23 +31,33 @@ def database = options.hd
 
 // Append "s" to the "t" to get all... i know, crazy, right...
 options.hts.each { intable ->
-    println "${intable}"
+    //println "${intable}"
 
 
     sql.eachRow("select db.name, t.tbl_id, t.tbl_name, t.tbl_type, s.input_format, s.location from " +
             "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
 //    println "$table.name, $table.tbl_name, $table.tbl_type, $table.input_format, $table.location"
+        println "USE $database;"
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
-            println "CREATE EXTERNAL TABLE $table.name" + "." + "$table.tbl_name" + TYPE_POSTFIX + " ("
+            println "CREATE EXTERNAL TABLE $table.tbl_name" + TYPE_POSTFIX + " ("
         } else {
             println "CREATE TABLE $table.name" + "." + "$table.tbl_name" + TYPE_POSTFIX + " ("
         }
-
+        def columns = []
         sql.eachRow("select c2.column_name, c2.type_name from " +
                 "TBLS t inner join SDS s on t.sd_id = s.sd_id inner join CDS c on s.cd_id = c.cd_id inner join COLUMNS_V2 c2 on c.cd_id = c2.cd_id " +
                 "where t.tbl_id = $table.tbl_id order by c2.integer_idx") { column ->
-            println "   $column.column_name $column.type_name" + ","
+            columns.add("$column.column_name $column.type_name")
         }
+        COLUMNS = ""
+        columns.each { column ->
+            COLUMNS = COLUMNS + "   " + column;
+            if (column != columns.last()) {
+                COLUMNS = COLUMNS + ",\n"
+            }
+        }
+        println COLUMNS
+
         println ")"
         // Partitions
         def partitions = []
