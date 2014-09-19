@@ -212,7 +212,7 @@ options.hts.each { intable ->
                         // Create output file for partition set.
                         def partfile_name = intable+"/part_"+part_file_count+".sql"
                         if (! new File(options.output+"/"+intable).exists())
-                            new File(options.output+"/"+partfile_name).mkdir()
+                            new File(options.output+"/"+intable).mkdir()
                         new File(options.output+"/"+partfile_name).withWriter { partfile ->
                             // Add use..
                             partfile.writeLine("USE $database;")
@@ -246,7 +246,7 @@ options.hts.each { intable ->
                                 // Create output file for partition set.
                                 def partfile_name = intable+"/part_"+part_file_count+".sql"
                                 if (! new File(options.output+"/"+intable).exists())
-                                    new File(options.output+"/"+partfile_name).mkdir()
+                                    new File(options.output+"/"+intable).mkdir()
                                 new File(options.output+"/"+partfile_name).withWriter { partfile ->
                                     // Add use..
                                     partfile.writeLine("USE $database;")
