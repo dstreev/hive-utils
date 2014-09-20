@@ -53,6 +53,9 @@ outputdir.mkdir();
 
 // DDL Cmd Array
 def ddl_statements = []
+def rename_statements = []
+def ddl_cleanup = []
+def external_tbl_cleanup = []
 
 HIVE_SET="set hive.exec.dynamic.partition=true;\n" +
 "set hive.exec.dynamic.partition.mode=nonstrict;"
@@ -71,7 +74,7 @@ options.hts.each { intable ->
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
             CREATE_STATEMENT = "CREATE EXTERNAL TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
         } else {
-            CREATE_STATEMENT "CREATE TABLE IF NOT EXISTS $table.name" + "." + "$table.tbl_name" + TYPE_POSTFIX + " (\n"
+            CREATE_STATEMENT "CREATE TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
         }
         def columns = []
         sql.eachRow("select c2.column_name, c2.type_name from " +
@@ -108,6 +111,7 @@ options.hts.each { intable ->
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
             // STORED AS
             CREATE_STATEMENT = CREATE_STATEMENT + "STORED AS ORC\n"
+            external_tbl_cleanup.add("hdfs dfs -rm -r $table.location")
             if (!options.ahb)
                 location = "$table.location" + "_orc"
             else
@@ -117,6 +121,11 @@ options.hts.each { intable ->
             // STORED AS
             CREATE_STATEMENT = CREATE_STATEMENT + "STORED AS ORC;"
         }
+
+        rename_statements.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
+        rename_statements.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
+
+        ddl_cleanup.add("DROP TABLE " + table.tbl_name + "_org;")
 
         ddl_statements.add(CREATE_STATEMENT)
     }
@@ -286,6 +295,35 @@ ddl_file.withWriter { ddlout ->
         ddlout.writeLine(ddl)
     }
 }
+
+rename = new File(options.output + "/rename.sql")
+rename.withWriter { ren ->
+    ren.writeLine("use $database;")
+    rename_statements.each { ren_st ->
+        ren.writeLine(ren_st)
+    }
+
+}
+
+ddl_cleanup
+
+dclean = new File(options.output + "/ddl_cleanup.sql")
+dclean.withWriter { dc ->
+    dc.writeLine("use $database;")
+    ddl_cleanup.each { cln_st ->
+        dc.writeLine(cln_st)
+    }
+
+}
+
+extClean = new File(options.output + "/ext_cleanup.sh")
+extClean.withWriter { dc ->
+    external_tbl_cleanup.each { cln_st ->
+        dc.writeLine(cln_st)
+    }
+
+}
+
 controlfile = new File(options.output+"/control.sh")
 controlfile.withWriter { cout ->
     cout.writeLine("#!/bin/bash")
