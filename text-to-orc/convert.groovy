@@ -19,6 +19,7 @@ cli.mh(longOpt: 'metastore-host', args: 1, required: true, 'Metastore Database H
 cli.mu(longOpt: 'metastore-user', args: 1, required: true, 'Metastore Database Username')
 cli.mp(longOpt: 'metastore-password', args: 1, required: true, 'Metastore Database Password')
 cli.md(longOpt: 'metastore-database', args: 1, required: true, 'Metastore Database')
+cli.ahb(longOpt: 'alt-hdfs-base', args: 1, required: false, 'Alternate HDFS Tables Base Directory')
 
 def options = cli.parse(this.args)
 
@@ -53,15 +54,6 @@ outputdir.mkdir();
 // DDL Cmd Array
 def ddl_statements = []
 
-/*
-def fields = ["a":"1", "b":"2", "c":"3"]
-new File("foo.ini").withWriter { out ->
-    fields.each() { key, value ->
-        out.writeLine("${key}=${value}")
-    }
-}
-*/
-
 HIVE_SET="set hive.exec.dynamic.partition=true;\n" +
 "set hive.exec.dynamic.partition.mode=nonstrict;"
 def controlcmds = []
@@ -74,7 +66,7 @@ options.hts.each { intable ->
     sql.eachRow("select db.name, t.tbl_id, t.tbl_name, t.tbl_type, s.input_format, s.location from " +
             "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
 //    println "$table.name, $table.tbl_name, $table.tbl_type, $table.input_format, $table.location"
-        println "USE $database;"
+//        println "USE $database;"
         def CREATE_STATEMENT
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
             CREATE_STATEMENT = "CREATE EXTERNAL TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
@@ -116,7 +108,10 @@ options.hts.each { intable ->
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
             // STORED AS
             CREATE_STATEMENT = CREATE_STATEMENT + "STORED AS ORC\n"
-            location = "$table.location" + "_orc"
+            if (!options.ahb)
+                location = "$table.location" + "_orc"
+            else
+                location = options.ahb + "/" + intable + "_orc"
             CREATE_STATEMENT = CREATE_STATEMENT +  "LOCATION '" + location + "';"
         } else {
             // STORED AS
@@ -216,6 +211,8 @@ options.hts.each { intable ->
                         new File(options.output+"/"+partfile_name).withWriter { partfile ->
                             // Add use..
                             partfile.writeLine("USE $database;")
+                            // Add Set Commands
+                            partfile.writeLine(HIVE_SET)
                             // Add Insert..
                             partfile.writeLine(INSERT_STATEMENT_WITH_WHERE)
                             // Add to control file.
@@ -250,6 +247,8 @@ options.hts.each { intable ->
                                 new File(options.output+"/"+partfile_name).withWriter { partfile ->
                                     // Add use..
                                     partfile.writeLine("USE $database;")
+                                    // Add Set Commands
+                                    partfile.writeLine(HIVE_SET)
                                     // Add Insert..
                                     partfile.writeLine(INSERT_STATEMENT_WITH_WHERE)
                                     // Add to control file.
