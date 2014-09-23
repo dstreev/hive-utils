@@ -331,7 +331,7 @@ controlfile.withWriter { cout ->
     cout.writeLine("hive -f build_ddl.sql")
     controlcmds.each { cmd ->
         if (options.nohup.asBoolean() == true)
-            cout.writeLine("nohup $cmd > "+options.output+".nohup.out &")
+            cout.writeLine("nohup $cmd >> "+options.output+".nohup.out &")
         else
             cout.writeLine(cmd)
     }
