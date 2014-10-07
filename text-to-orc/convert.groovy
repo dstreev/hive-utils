@@ -52,8 +52,12 @@ outputdir.mkdir();
 // Create DDL File
 
 // DDL Cmd Array
-def ddl_statements = []
-def rename_statements = []
+def ddl_statements_tmp = []
+def ddl_statements_new = []
+def ext_location_tmp = []
+def ext_location_org = []
+def rename_statements_working = []
+def rename_statements_final = []
 def ddl_cleanup = []
 def external_tbl_cleanup = []
 
@@ -70,11 +74,15 @@ options.hts.each { intable ->
             "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
 //    println "$table.name, $table.tbl_name, $table.tbl_type, $table.input_format, $table.location"
 //        println "USE $database;"
-        def CREATE_STATEMENT
+        def CREATE_STATEMENT_TMP
+        def CREATE_STATEMENT_NEW
+
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
-            CREATE_STATEMENT = "CREATE EXTERNAL TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
+            CREATE_STATEMENT_TMP = "CREATE EXTERNAL TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
+            CREATE_STATEMENT_NEW = "CREATE EXTERNAL TABLE IF NOT EXISTS $table.tbl_name (\n"
         } else {
-            CREATE_STATEMENT "CREATE TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
+            CREATE_STATEMENT_TMP "CREATE TABLE IF NOT EXISTS $table.tbl_name" + TYPE_POSTFIX + " (\n"
+            CREATE_STATEMENT_NEW "CREATE TABLE IF NOT EXISTS $table.tbl_name (\n"
         }
         def columns = []
         sql.eachRow("select c2.column_name, c2.type_name from " +
@@ -89,7 +97,8 @@ options.hts.each { intable ->
                 COLUMNS = COLUMNS + ",\n"
             }
         }
-        CREATE_STATEMENT = CREATE_STATEMENT + COLUMNS + ")\n"
+        CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + COLUMNS + ")\n"
+        CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + COLUMNS + ")\n"
 
         // Partitions
         def partitions = []
@@ -104,30 +113,45 @@ options.hts.each { intable ->
             }
         }
         if (PARTITIONS.length() > 0) {
-            CREATE_STATEMENT = CREATE_STATEMENT + "PARTITIONED BY (\n" + PARTITIONS + "\n)\n"
+            CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "PARTITIONED BY (\n" + PARTITIONS + "\n)\n"
+            CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "PARTITIONED BY (\n" + PARTITIONS + "\n)\n"
         }
 
         // LOCATION if EXTERNAL
         if ("$table.tbl_type" == "EXTERNAL_TABLE") {
             // STORED AS
-            CREATE_STATEMENT = CREATE_STATEMENT + "STORED AS ORC\n"
-            external_tbl_cleanup.add("hdfs dfs -rm -r $table.location")
+            CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "STORED AS ORC\n"
+            CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC\n"
+            external_tbl_cleanup.add("hdfs dfs -rm -r -f $table.location")
             if (!options.ahb)
                 location = "$table.location" + "_orc"
             else
                 location = options.ahb + "/" + intable + "_orc"
-            CREATE_STATEMENT = CREATE_STATEMENT +  "LOCATION '" + location + "';"
+            CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "LOCATION '$table.location';"
+            CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP +  "LOCATION '" + location + "';"
+            // Used to moved the new orc location back to the original location.
+            ext_location_tmp.add(location);
+            ext_location_org.add(table.location);
+            // Move the ORC tables HDFS location to the Original Tables location
+            external_tbl_cleanup.add("hdfs dfs -mv $location $table.location")
+
         } else {
             // STORED AS
-            CREATE_STATEMENT = CREATE_STATEMENT + "STORED AS ORC;"
+            CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "STORED AS ORC;"
+            CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC;"
         }
 
-        rename_statements.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
-        rename_statements.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
+        rename_statements_working.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
+        rename_statements_working.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
 
         ddl_cleanup.add("DROP TABLE " + table.tbl_name + "_org;")
 
-        ddl_statements.add(CREATE_STATEMENT)
+        // Temp (Working) orc ddl
+        ddl_statements_tmp.add(CREATE_STATEMENT_TMP)
+        // Final orc ddl, to be applied after filesystem movement.
+        ddl_statements_new.add(CREATE_STATEMENT_NEW)
+        // Rebuild the partitions for the table after the data has been moved back.
+        ddl_statements_new.add("msck repair table $table.tbl_name;")
     }
 
 
@@ -291,23 +315,21 @@ options.hts.each { intable ->
 ddl_file = new File(options.output+"/build_ddl.sql")
 ddl_file.withWriter { ddlout ->
     ddlout.writeLine("use $database;")
-    ddl_statements.each { ddl ->
+    ddl_statements_tmp.each { ddl ->
         ddlout.writeLine(ddl)
     }
 }
 
-rename = new File(options.output + "/rename.sql")
+rename = new File(options.output + "/2-rename.sql")
 rename.withWriter { ren ->
     ren.writeLine("use $database;")
-    rename_statements.each { ren_st ->
+    rename_statements_working.each { ren_st ->
         ren.writeLine(ren_st)
     }
 
 }
 
-ddl_cleanup
-
-dclean = new File(options.output + "/ddl_cleanup.sql")
+dclean = new File(options.output + "/3-ddl_cleanup.sql")
 dclean.withWriter { dc ->
     dc.writeLine("use $database;")
     ddl_cleanup.each { cln_st ->
@@ -316,7 +338,7 @@ dclean.withWriter { dc ->
 
 }
 
-extClean = new File(options.output + "/ext_cleanup.sh")
+extClean = new File(options.output + "/4-ext_cleanup.sh")
 extClean.withWriter { dc ->
     external_tbl_cleanup.each { cln_st ->
         dc.writeLine(cln_st)
@@ -324,7 +346,17 @@ extClean.withWriter { dc ->
 
 }
 
-controlfile = new File(options.output+"/control.sh")
+extRebuild = new File(options.output + "/5-table_rebuild.sh")
+extRebuild.withWriter { dc ->
+    dc.writeLine("use $database;")
+    ddl_statements_new.each { cln_st ->
+        dc.writeLine(cln_st)
+    }
+
+}
+
+
+controlfile = new File(options.output+"/1-control.sh")
 controlfile.withWriter { cout ->
     cout.writeLine("#!/bin/bash")
     cout.writeLine("cd `dirname \$0`")

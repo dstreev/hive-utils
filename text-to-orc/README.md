@@ -1,3 +1,11 @@
+# WARNING
+
+Running the scripts created by this process is a *destructive* process.  It will create working tables and migrate data from the original tables initially.  Later scripts will rename the original tables, remove their data directories and move the new table files created to the original files location.
+ 
+*BE WARNED* It is HIGHLY advisable to create an HDFS Snapshot of any directories that will be touched by this process, should something not go as planned.  This snapshot would be one of the only ways to recover data lost by this process.
+
+*RUN AS* The scripts created by this process, must be run as the owner of the current tables in order to preserve ownership rights.
+
 ## Summary
 
 This set of scripts will help build the tables and conversion SQL to migrate from TextFiles to ORC formatted files in Hive.
@@ -21,6 +29,12 @@ The scripts require a _hive database_ name, along with a comma separated list of
 A control script named *control.sh* will be created the will call the generated scripts in the proper order.  There is an option to have this script create "nohup" jobs.  For large tables or several tables, this is recommended to increase the parallelism of the process.  Otherwise, the script will be run in a sequential manner and may never utilize the full capacity of your cluster.
 
 On the other hand, be careful how many tables (and know their sizes) you use per run, as this is also a way to manage the amount of work you push out to the cluster.
+
+Steps:
+- 1. control.sh (will build the DDL and manage the transfer from the original table to the new orc tables)
+- 2. hive -f rename.sql (will change to tables names, replace the original textfile tables with the newly populated orc formatted tables.
+- 3. hive -f ddl_cleanup.sql (remove the ddl for the original tables)
+- 4. hive -f ext_clenanup.sql (remove all the old data store in the original Text external tables)
 
 ## Partition Transfers
 
