@@ -30,11 +30,11 @@ A control script named *control.sh* will be created the will call the generated 
 
 On the other hand, be careful how many tables (and know their sizes) you use per run, as this is also a way to manage the amount of work you push out to the cluster.
 
-Steps:
-- 1. control.sh (will build the DDL and manage the transfer from the original table to the new orc tables)
-- 2. hive -f rename.sql (will change to tables names, replace the original textfile tables with the newly populated orc formatted tables.
-- 3. hive -f ddl_cleanup.sql (remove the ddl for the original tables)
-- 4. hive -f ext_clenanup.sql (remove all the old data store in the original Text external tables)
+### Steps
+
+The scripts are prefixed to identify to order is which they should be run.  Shell scripts can be run as standalone scripts and the 'sql' scripts can be feed into the hive cli 'hive -f ...sql'.
+
+The 5th script will delete the original table data.  Validation should occur between steps 4 and 5.
 
 ## Partition Transfers
 

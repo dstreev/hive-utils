@@ -3,6 +3,14 @@
 /**
  * Build the migration scripts that populate the tables built in ORC format, from ctl.groovy.
  * Created by dstreev on 9/9/14.
+ *
+ * 1. Create ORC Tables '_orc'
+ * 2. Transfer Data
+ * 3. rename org to _org and _orc to org
+ * 4. mv hdfs data to _org and _orc to org
+ * 5. recreate the orc table in the orig location
+ * ---  VALIDATE HERE
+ * 6. cleanup _org table and _org hdfs
  */
 
 import groovy.sql.Sql
@@ -56,9 +64,9 @@ def ddl_statements_tmp = []
 def ddl_statements_new = []
 def ext_location_tmp = []
 def ext_location_org = []
-def rename_statements_working = []
-def rename_statements_final = []
-def ddl_cleanup = []
+def drop_tables = []
+def hdfs_statements_working = []
+//def ddl_cleanup = []
 def external_tbl_cleanup = []
 
 HIVE_SET="set hive.exec.dynamic.partition=true;\n" +
@@ -122,7 +130,8 @@ options.hts.each { intable ->
             // STORED AS
             CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "STORED AS ORC\n"
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC\n"
-            external_tbl_cleanup.add("hdfs dfs -rm -r -f $table.location")
+            external_tbl_cleanup.add("hdfs dfs -rm -r -f "+ table.location + "_org")
+            hdfs_statements_working.add("hdfs dfs -mv " + table.location + " " + table.location + "_org")
             if (!options.ahb)
                 location = "$table.location" + "_orc"
             else
@@ -133,7 +142,7 @@ options.hts.each { intable ->
             ext_location_tmp.add(location);
             ext_location_org.add(table.location);
             // Move the ORC tables HDFS location to the Original Tables location
-            external_tbl_cleanup.add("hdfs dfs -mv $location $table.location")
+            hdfs_statements_working.add("hdfs dfs -mv $location $table.location")
 
         } else {
             // STORED AS
@@ -141,14 +150,16 @@ options.hts.each { intable ->
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC;"
         }
 
-        rename_statements_working.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
-        rename_statements_working.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
+//        drop_tables.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
+        drop_tables.add("DROP TABLE $table.tbl_name;")
+//        drop_tables.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
 
-        ddl_cleanup.add("DROP TABLE " + table.tbl_name + "_org;")
+//        ddl_cleanup.add("DROP TABLE " + table.tbl_name + "_org;")
 
         // Temp (Working) orc ddl
         ddl_statements_tmp.add(CREATE_STATEMENT_TMP)
         // Final orc ddl, to be applied after filesystem movement.
+//        ddl_statements_new.add("DROP TABLE " + table.tbl_name + ";")
         ddl_statements_new.add(CREATE_STATEMENT_NEW)
         // Rebuild the partitions for the table after the data has been moved back.
         ddl_statements_new.add("msck repair table $table.tbl_name;")
@@ -320,25 +331,24 @@ ddl_file.withWriter { ddlout ->
     }
 }
 
-rename = new File(options.output + "/2-rename.sql")
+rename = new File(options.output + "/2-drop.sql")
 rename.withWriter { ren ->
     ren.writeLine("use $database;")
-    rename_statements_working.each { ren_st ->
+    drop_tables.each { ren_st ->
         ren.writeLine(ren_st)
     }
-
 }
 
-dclean = new File(options.output + "/3-ddl_cleanup.sql")
-dclean.withWriter { dc ->
-    dc.writeLine("use $database;")
-    ddl_cleanup.each { cln_st ->
-        dc.writeLine(cln_st)
-    }
+//dclean = new File(options.output + "/3-ddl_cleanup.sql")
+//dclean.withWriter { dc ->
+//    dc.writeLine("use $database;")
+//    ddl_cleanup.each { cln_st ->
+//        dc.writeLine(cln_st)
+//    }
+//
+//}
 
-}
-
-extClean = new File(options.output + "/4-ext_cleanup.sh")
+extClean = new File(options.output + "/5-org_hdfs_cleanup.sh")
 extClean.withWriter { dc ->
     external_tbl_cleanup.each { cln_st ->
         dc.writeLine(cln_st)
@@ -346,7 +356,15 @@ extClean.withWriter { dc ->
 
 }
 
-extRebuild = new File(options.output + "/5-table_rebuild.sh")
+hdfsClean = new File(options.output + "/3-hdfs_mv.sh")
+hdfsClean.withWriter { dc ->
+    hdfs_statements_working.each { cln_st ->
+        dc.writeLine(cln_st)
+    }
+
+}
+
+extRebuild = new File(options.output + "/4-table_rebuild.sql")
 extRebuild.withWriter { dc ->
     dc.writeLine("use $database;")
     ddl_statements_new.each { cln_st ->
