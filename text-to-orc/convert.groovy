@@ -64,17 +64,16 @@ def ddl_statements_tmp = []
 def ddl_statements_new = []
 def ext_location_tmp = []
 def ext_location_org = []
-def drop_tables = []
+def rename_tables = []
 def hdfs_statements_working = []
-//def ddl_cleanup = []
-def external_tbl_cleanup = []
+def table_cleanup = []
 
 HIVE_SET="set hive.exec.dynamic.partition=true;\n" +
 "set hive.exec.dynamic.partition.mode=nonstrict;"
 def controlcmds = []
 
 // Append "s" to the "t" to get all... i know, crazy, right...
-options.hts.each { intable ->
+options.hts.unique(false).each { intable ->
     //println "${intable}"
 
     // Build DDL
@@ -130,7 +129,7 @@ options.hts.each { intable ->
             // STORED AS
             CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "STORED AS ORC\n"
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC\n"
-            external_tbl_cleanup.add("hdfs dfs -rm -r -f "+ table.location + "_org")
+            table_cleanup.add("hdfs dfs -rm -r -f "+ table.location + "_org")
             hdfs_statements_working.add("hdfs dfs -mv " + table.location + " " + table.location + "_org")
             if (!options.ahb)
                 location = "$table.location" + "_orc"
@@ -150,8 +149,8 @@ options.hts.each { intable ->
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC;"
         }
 
-//        drop_tables.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
-        drop_tables.add("DROP TABLE $table.tbl_name;")
+        rename_tables.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
+        table_cleanup.add("hive -e 'use $database; DROP TABLE $table.tbl_name" + "_org;'")
 //        drop_tables.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
 
 //        ddl_cleanup.add("DROP TABLE " + table.tbl_name + "_org;")
@@ -331,10 +330,10 @@ ddl_file.withWriter { ddlout ->
     }
 }
 
-rename = new File(options.output + "/2-drop.sql")
+rename = new File(options.output + "/2-rename.sql")
 rename.withWriter { ren ->
     ren.writeLine("use $database;")
-    drop_tables.each { ren_st ->
+    rename_tables.each { ren_st ->
         ren.writeLine(ren_st)
     }
 }
@@ -350,7 +349,7 @@ rename.withWriter { ren ->
 
 extClean = new File(options.output + "/5-org_hdfs_cleanup.sh")
 extClean.withWriter { dc ->
-    external_tbl_cleanup.each { cln_st ->
+    table_cleanup.each { cln_st ->
         dc.writeLine(cln_st)
     }
 
