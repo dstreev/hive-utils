@@ -20,6 +20,7 @@ import groovyjarjarcommonscli.Option
 def cli = new CliBuilder()
 cli.hd(longOpt: 'hive-database', args: 1, required: true, 'Database to include, REQUIRED')
 cli.ht(longOpt: 'hive-tables', args: Option.UNLIMITED_VALUES, valueSeparator: ',', required: true, 'Comma separated list of tables, REQUIRED')
+cli.pr(longOpt: 'partition-reduction', args: 1, required: false, 'Reduce Multi-Level Partitioned table to n partitions during conversion')
 cli.pp(longOpt: 'parallel-partitions', args: 1, required: false, 'Parallel Partition Count to process in statement(default 30)')
 cli.nohup(longOpt: 'nohup', args: 1, required: false, 'Build scripts to run each load sql in its nohup thread')
 cli.output(longOpt: 'output-dir', args: 1, required: true, 'Output Directory for scripts')
@@ -35,12 +36,24 @@ sql = Sql.newInstance('jdbc:mysql://' + options.mh + ':3306/' + options.md, opti
 
 TYPE_POSTFIX = "_orc"
 
+def partition_reduction = false
+def partition_reduction_count = 1
+
 def PARALLEL_PARTITIONS = 30
 if (options.pp) {
     PARALLEL_PARTITIONS = options.pp.toInteger()
 } else {
     PARALLEL_PARTITIONS = 30
 }
+
+if (options.pr) {
+    partition_reduction = true
+    partition_reduction_count = options.pr.toInteger()
+}
+
+println("Partition Reduction: $partition_reduction")
+println("Partition Reduction Count: $partition_reduction_count")
+
 TYPE_POSTFIX = "_orc"
 
 def database = options.hd
@@ -68,8 +81,8 @@ def rename_tables = []
 def hdfs_statements_working = []
 def table_cleanup = []
 
-HIVE_SET="set hive.exec.dynamic.partition=true;\n" +
-"set hive.exec.dynamic.partition.mode=nonstrict;"
+HIVE_SET = "set hive.exec.dynamic.partition=true;\n" +
+        "set hive.exec.dynamic.partition.mode=nonstrict;"
 def controlcmds = []
 
 // Append "s" to the "t" to get all... i know, crazy, right...
@@ -104,8 +117,6 @@ options.hts.unique(false).each { intable ->
                 COLUMNS = COLUMNS + ",\n"
             }
         }
-        CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + COLUMNS + ")\n"
-        CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + COLUMNS + ")\n"
 
         // Partitions
         def partitions = []
@@ -113,12 +124,29 @@ options.hts.unique(false).each { intable ->
         sql.eachRow("select p.pkey_name, p.pkey_type from TBLS t inner join PARTITION_KEYS p on t.tbl_id = p.tbl_id where t.tbl_id = $table.tbl_id order by p.integer_idx; ") { partition ->
             partitions.add("$partition.pkey_name $partition.pkey_type")
         }
+
+        def pCount = 0;
         partitions.each { partition ->
-            PARTITIONS = PARTITIONS + "   " + partition;
-            if (partition != partitions.last()) {
-                PARTITIONS = PARTITIONS + ",\n"
+            if (partition_reduction) {
+                if (pCount++ < partition_reduction_count) {
+                    PARTITIONS = PARTITIONS + "   " + partition;
+                    if (partition != partitions.last() && pCount < partition_reduction_count) {
+                        PARTITIONS = PARTITIONS + ",\n"
+                    }
+                } else {
+                    COLUMNS = COLUMNS + ",\n" + partition;
+                }
+            } else {
+                PARTITIONS = PARTITIONS + "   " + partition;
+                if (partition != partitions.last()) {
+                    PARTITIONS = PARTITIONS + ",\n"
+                }
             }
         }
+
+        CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + COLUMNS + ")\n"
+        CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + COLUMNS + ")\n"
+
         if (PARTITIONS.length() > 0) {
             CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "PARTITIONED BY (\n" + PARTITIONS + "\n)\n"
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "PARTITIONED BY (\n" + PARTITIONS + "\n)\n"
@@ -129,14 +157,14 @@ options.hts.unique(false).each { intable ->
             // STORED AS
             CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "STORED AS ORC\n"
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "STORED AS ORC\n"
-            table_cleanup.add("hdfs dfs -rm -r -f "+ table.location + "_org")
+            table_cleanup.add("hdfs dfs -rm -r -f " + table.location + "_org")
             hdfs_statements_working.add("hdfs dfs -mv " + table.location + " " + table.location + "_org")
             if (!options.ahb)
                 location = "$table.location" + "_orc"
             else
                 location = options.ahb + "/" + intable + "_orc"
             CREATE_STATEMENT_NEW = CREATE_STATEMENT_NEW + "LOCATION '$table.location';"
-            CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP +  "LOCATION '" + location + "';"
+            CREATE_STATEMENT_TMP = CREATE_STATEMENT_TMP + "LOCATION '" + location + "';"
             // Used to moved the new orc location back to the original location.
             ext_location_tmp.add(location);
             ext_location_org.add(table.location);
@@ -165,7 +193,6 @@ options.hts.unique(false).each { intable ->
         ddl_statements_new.add("msck repair table $table.tbl_name;")
     }
 
-
 //    if (options.nohup.asBoolean() != true) {
 //        // Prepare for dynamic queries.
 //        println HIVE_SET
@@ -173,7 +200,6 @@ options.hts.unique(false).each { intable ->
 
     sql.eachRow("select db.name, t.tbl_id, t.tbl_name, t.tbl_type, s.input_format, s.location from " +
             "DBS db inner join TBLS t on db.db_id = t.db_id inner join SDS s on t.sd_id = s.sd_id where s.input_format = 'org.apache.hadoop.mapred.TextInputFormat' and db.name='${database}' and t.tbl_name='${intable}'") { table ->
-
 
 //        if (options.nohup.asBoolean() != true)
 //            println "USE $database;"
@@ -201,11 +227,33 @@ options.hts.unique(false).each { intable ->
             partition_def.add("$partition.pkey_name")
         }
         def PARTITIONS = ""
+        pCount = 0
         partition_def.each { partition ->
-            PARTITIONS = PARTITIONS + " " + partition;
-            if (partition != partition_def.last()) {
-                PARTITIONS = PARTITIONS + ","
+
+
+            if (partition_reduction) {
+                if (pCount++ < partition_reduction_count) {
+                    PARTITIONS = PARTITIONS + partition;
+                    if (partition != partition_def.last() && pCount < partition_reduction_count) {
+                        PARTITIONS = PARTITIONS + ",\n"
+                    }
+                } else {
+                    FIELDS = FIELDS + ", " + partition;
+                }
+            } else {
+                PARTITIONS = PARTITIONS + partition;
+                if (partition != partition_def.last()) {
+                    PARTITIONS = PARTITIONS + ", "
+                }
             }
+
+
+
+
+//            PARTITIONS = PARTITIONS + " " + partition;
+//            if (partition != partition_def.last()) {
+//                PARTITIONS = PARTITIONS + ","
+//            }
         }
 
         def INSERT_STATEMENT = "INSERT OVERWRITE TABLE $intable" + TYPE_POSTFIX + " "
@@ -222,7 +270,7 @@ options.hts.unique(false).each { intable ->
             INSERT_STATEMENT = INSERT_STATEMENT + "   SELECT\n"
             INSERT_STATEMENT = INSERT_STATEMENT + "      " + FIELDS + "\n"
             INSERT_STATEMENT = INSERT_STATEMENT + "       ," + PARTITIONS + "\n"
-            INSERT_STATEMENT = INSERT_STATEMENT + "   FROM " + intable + "\n"
+            INSERT_STATEMENT = INSERT_STATEMENT + "   FROM " + intable
 
 
             if (partitions.size() > 0) {
@@ -246,13 +294,13 @@ options.hts.unique(false).each { intable ->
                     if (actual_partition == partitions.last()) {
                         // Last partition, special Handling.
                         wherePart.add(key + " <= '" + value + "'")
-                        INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "\n   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
+                        INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
                         part_file_count++;
                         // Create output file for partition set.
-                        def partfile_name = intable+"/part_"+part_file_count+".sql"
-                        if (! new File(options.output+"/"+intable).exists())
-                            new File(options.output+"/"+intable).mkdir()
-                        new File(options.output+"/"+partfile_name).withWriter { partfile ->
+                        def partfile_name = intable + "/part_" + part_file_count + ".sql"
+                        if (!new File(options.output + "/" + intable).exists())
+                            new File(options.output + "/" + intable).mkdir()
+                        new File(options.output + "/" + partfile_name).withWriter { partfile ->
                             // Add use..
                             partfile.writeLine("USE $database;")
                             // Add Set Commands
@@ -285,10 +333,10 @@ options.hts.unique(false).each { intable ->
                                 INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "\n   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
                                 part_file_count++;
                                 // Create output file for partition set.
-                                def partfile_name = intable+"/part_"+part_file_count+".sql"
-                                if (! new File(options.output+"/"+intable).exists())
-                                    new File(options.output+"/"+intable).mkdir()
-                                new File(options.output+"/"+partfile_name).withWriter { partfile ->
+                                def partfile_name = intable + "/part_" + part_file_count + ".sql"
+                                if (!new File(options.output + "/" + intable).exists())
+                                    new File(options.output + "/" + intable).mkdir()
+                                new File(options.output + "/" + partfile_name).withWriter { partfile ->
                                     // Add use..
                                     partfile.writeLine("USE $database;")
                                     // Add Set Commands
@@ -316,14 +364,13 @@ options.hts.unique(false).each { intable ->
             // NO partitions defined.
         }
 
-
         // TODO: Build the swap commands.
 
 
     }
 }
 
-ddl_file = new File(options.output+"/build_ddl.sql")
+ddl_file = new File(options.output + "/build_ddl.sql")
 ddl_file.withWriter { ddlout ->
     ddlout.writeLine("use $database;")
     ddl_statements_tmp.each { ddl ->
@@ -374,14 +421,14 @@ extRebuild.withWriter { dc ->
 }
 
 
-controlfile = new File(options.output+"/1-control.sh")
+controlfile = new File(options.output + "/1-control.sh")
 controlfile.withWriter { cout ->
     cout.writeLine("#!/bin/bash")
     cout.writeLine("cd `dirname \$0`")
     cout.writeLine("hive -f build_ddl.sql")
     controlcmds.each { cmd ->
         if (options.nohup.asBoolean() == true)
-            cout.writeLine("nohup $cmd >> "+options.output+".nohup.out &")
+            cout.writeLine("nohup $cmd >> " + options.output + ".nohup.out &")
         else
             cout.writeLine(cmd)
     }
