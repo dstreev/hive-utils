@@ -151,6 +151,7 @@ options.hts.unique(false).each { intable ->
 
         rename_tables.add("ALTER TABLE $table.tbl_name RENAME TO $table.tbl_name" + "_org;")
         table_cleanup.add("hive -e 'use $database; DROP TABLE $table.tbl_name" + "_org;'")
+        table_cleanup.add("hive -e 'use $database; DROP TABLE $table.tbl_name" + "_orc;'")
 //        drop_tables.add("ALTER TABLE $table.tbl_name" + TYPE_POSTFIX + " RENAME TO $table.tbl_name;")
 
 //        ddl_cleanup.add("DROP TABLE " + table.tbl_name + "_org;")
