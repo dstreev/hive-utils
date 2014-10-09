@@ -11,3 +11,6 @@ logs
 # Intellij
 .idea
 *.iml
+
+test
+*.zip
