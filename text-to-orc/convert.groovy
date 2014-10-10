@@ -362,8 +362,26 @@ options.hts.unique(false).each { intable ->
 
         } else {
             // NO partitions defined.
-        }
+            INSERT_STATEMENT = INSERT_STATEMENT + "\n   SELECT\n"
+            INSERT_STATEMENT = INSERT_STATEMENT + "      " + FIELDS + "\n"
+            INSERT_STATEMENT = INSERT_STATEMENT + "   FROM " + intable + ";"
 
+            def partfile_name = intable + "/part_0.sql"
+
+            if (!new File(options.output + "/" + intable).exists())
+                new File(options.output + "/" + intable).mkdir()
+            new File(options.output + "/" + partfile_name).withWriter { partfile ->
+                // Add use..
+                partfile.writeLine("USE $database;")
+                // Add Set Commands
+                partfile.writeLine(HIVE_SET)
+                // Add Insert..
+                partfile.writeLine(INSERT_STATEMENT)
+                // Add to control file.
+                controlcmds.add("hive -f $partfile_name")
+
+            }
+        }
         // TODO: Build the swap commands.
 
 
