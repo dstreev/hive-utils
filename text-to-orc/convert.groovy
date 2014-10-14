@@ -294,24 +294,30 @@ options.hts.unique(false).each { intable ->
                     if (actual_partition == partitions.last()) {
                         // Last partition, special Handling.
                         wherePart.add(key + " <= '" + value + "'")
-                        INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
-                        part_file_count++;
-                        // Create output file for partition set.
-                        def partfile_name = intable + "/part_" + part_file_count + ".sql"
-                        if (!new File(options.output + "/" + intable).exists())
-                            new File(options.output + "/" + intable).mkdir()
-                        new File(options.output + "/" + partfile_name).withWriter { partfile ->
-                            // Add use..
-                            partfile.writeLine("USE $database;")
-                            // Add Set Commands
-                            partfile.writeLine(HIVE_SET)
-                            // Add Insert..
-                            partfile.writeLine(INSERT_STATEMENT_WITH_WHERE)
-                            // Add to control file.
-                            controlcmds.add("hive -f $partfile_name")
+                        if (wherePart[1] != null)
+                            INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
+                        else
+                            INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "   WHERE " + wherePart[0] + ";"
+
+                        if (PARALLEL_PARTITIONS > 1) {
+                            part_file_count++;
+                            // Create output file for partition set.
+                            def partfile_name = intable + "/part_" + part_file_count + ".sql"
+                            if (!new File(options.output + "/" + intable).exists())
+                                new File(options.output + "/" + intable).mkdir()
+                            new File(options.output + "/" + partfile_name).withWriter { partfile ->
+                                // Add use..
+                                partfile.writeLine("USE $database;")
+                                // Add Set Commands
+                                partfile.writeLine(HIVE_SET)
+                                // Add Insert..
+                                partfile.writeLine(INSERT_STATEMENT_WITH_WHERE)
+                                // Add to control file.
+                                controlcmds.add("hive -f $partfile_name")
 //                                controlfile.withWriter { cout ->
 //                                    cout.writeLine("nohup hive -f $partfile_name &")
 //                                }
+                            }
                         }
                     } else {
                         if (value == lastPart) {
@@ -322,7 +328,10 @@ options.hts.unique(false).each { intable ->
 
                             if (part_count == 0 || part_count == (PARALLEL_PARTITIONS - 1)) {
                                 if (part_count == 0)
-                                    wherePart.add(key + " >= '" + value + "'")
+                                    if (PARALLEL_PARTITIONS > 1)
+                                        wherePart.add(key + " >= '" + value + "'")
+                                    else
+                                        wherePart.add(key + " = '" + value + "'")
                                 else if (part_count == PARALLEL_PARTITIONS - 1)
                                     wherePart.add(key + " <= '" + value + "'")
 
@@ -330,7 +339,10 @@ options.hts.unique(false).each { intable ->
                             if (part_count >= PARALLEL_PARTITIONS - 1) {
                                 // reset
                                 // set where based on current where part.
-                                INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "\n   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
+                                if (wherePart[1] != null)
+                                    INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "\n   WHERE " + wherePart[0] + " and " + wherePart[1] + ";"
+                                else
+                                    INSERT_STATEMENT_WITH_WHERE = INSERT_STATEMENT + "\n   WHERE " + wherePart[0] + ";"
                                 part_file_count++;
                                 // Create output file for partition set.
                                 def partfile_name = intable + "/part_" + part_file_count + ".sql"
