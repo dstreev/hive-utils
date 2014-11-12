@@ -23,6 +23,7 @@ cli.ht(longOpt: 'hive-tables', args: Option.UNLIMITED_VALUES, valueSeparator: ',
 cli.pr(longOpt: 'partition-reduction', args: 1, required: false, 'Reduce Multi-Level Partitioned table to n partitions during conversion')
 cli.pp(longOpt: 'parallel-partitions', args: 1, required: false, 'Parallel Partition Count to process in statement(default 30)')
 cli.nohup(longOpt: 'nohup', args: 1, required: false, 'Build scripts to run each load sql in its nohup thread')
+cli.sleep(longOpt: 'sleep', args: 1, required: false, 'Add a sleep (seconds) in between nohup commands, only applied when nohup specified')
 cli.output(longOpt: 'output-dir', args: 1, required: true, 'Output Directory for scripts')
 cli.mh(longOpt: 'metastore-host', args: 1, required: true, 'Metastore Database Host')
 cli.mu(longOpt: 'metastore-user', args: 1, required: true, 'Metastore Database Username')
@@ -457,9 +458,12 @@ controlfile.withWriter { cout ->
     cout.writeLine("cd `dirname \$0`")
     cout.writeLine("hive -f build_ddl.sql")
     controlcmds.each { cmd ->
-        if (options.nohup.asBoolean() == true)
+        if (options.nohup.asBoolean() == true) {
             cout.writeLine("nohup $cmd >> " + options.output + ".nohup.out &")
-        else
+            if (options.sleep)
+                cout.writeLine("sleep " + options.sleep.toInteger())
+        } else {
             cout.writeLine(cmd)
+        }
     }
 }
